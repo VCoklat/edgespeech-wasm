@@ -5,27 +5,26 @@ export default function App() {
   const [intentResult, setIntentResult] = useState(null);
   const [isLoadingIntent, setIsLoadingIntent] = useState(false);
 
-  // Dipanggil otomatis saat AudioTranscriber selesai melakukan inferensi ASR
+  // Triggered automatically when client-side ASR completes
   const handleTranscriptionComplete = async (transcriptText) => {
     if (!transcriptText || !transcriptText.trim()) return;
 
     setIsLoadingIntent(true);
     try {
-      // Mengirimkan teks hasil ASR ke gateway FastAPI serverless Vercel
       const response = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: transcriptText }),
       });
 
-      if (!response.ok) throw new Error('Gagal terhubung ke API gateway');
+      if (!response.ok) throw new Error('Failed to connect to API gateway');
 
       const data = await response.json();
       setIntentResult(data);
     } catch (error) {
-      console.error('Error Intent Processing:', error);
+      console.error('Error processing intent:', error);
       setIntentResult({
-        error: 'Gagal mengekstrak intent dari serverless gateway.',
+        error: 'Failed to extract intent from serverless gateway.',
       });
     } finally {
       setIsLoadingIntent(false);
@@ -50,7 +49,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Core Application Section */}
+      {/* Main Application Interface */}
       <main style={styles.main}>
         {/* Component 1: Client-Side Audio Inference */}
         <AudioTranscriber onTranscribeComplete={handleTranscriptionComplete} />
@@ -58,13 +57,15 @@ export default function App() {
         {/* Component 2: Downstream Intent & NLP Analysis */}
         <section style={styles.card}>
           <h3 style={styles.cardTitle}>Downstream Intent & Summary (Gemma 4)</h3>
-          
+
           {isLoadingIntent ? (
-            <p style={{ color: '#d97706' }}>Memproses intent via FastAPI gateway...</p>
+            <p style={{ color: '#d97706', margin: 0 }}>
+              Processing intent via FastAPI gateway...
+            </p>
           ) : intentResult ? (
             <div style={styles.resultBox}>
               {intentResult.error ? (
-                <p style={{ color: '#ef4444' }}>{intentResult.error}</p>
+                <p style={{ color: '#ef4444', margin: 0 }}>{intentResult.error}</p>
               ) : (
                 <>
                   <p style={{ margin: '0 0 0.5rem 0' }}>
@@ -77,8 +78,8 @@ export default function App() {
               )}
             </div>
           ) : (
-            <p style={{ color: '#9ca3af', fontSize: '0.9rem' }}>
-              Rekam suara di atas untuk memicu ekstraksi intent NLP secara otomatis.
+            <p style={{ color: '#9ca3af', fontSize: '0.9rem', margin: 0 }}>
+              Record your voice above to automatically trigger NLP intent extraction.
             </p>
           )}
         </section>
@@ -89,21 +90,21 @@ export default function App() {
         <p>Built by <strong>Dedy Van Hauten</strong></p>
         <p>
           <a href="mailto:dvanhauten@gmail.com" style={styles.link}>Email</a> |{' '}
-          <a 
-            href="https://www.linkedin.com/in/dedyvanhauten" 
-            target="_blank" 
-            rel="noreferrer" 
+          <a
+            href="https://www.linkedin.com/in/dedyvanhauten"
+            target="_blank"
+            rel="noreferrer"
             style={styles.link}
           >
             LinkedIn
           </a> |{' '}
-          <a 
-            href="https://huggingface.co/VCoklat/edgespeech-whisper-tiny-int8" 
-            target="_blank" 
-            rel="noreferrer" 
+          <a
+            href="https://huggingface.co/VCoklat/edgespeech-whisper-tiny-int8"
+            target="_blank"
+            rel="noreferrer"
             style={styles.link}
           >
-            HuggingFace Model
+            Hugging Face Model
           </a>
         </p>
       </footer>
@@ -111,7 +112,6 @@ export default function App() {
   );
 }
 
-// Inline Styles (Tanpa Perlu Setup CSS Framework Tambahan)
 const styles = {
   container: {
     maxWidth: '750px',

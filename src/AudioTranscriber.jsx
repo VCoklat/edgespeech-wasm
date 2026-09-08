@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { pipeline, env } from '@xenova/transformers';
 
-// Konfigurasi akses remote ke repositori Hugging Face
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
@@ -12,12 +11,13 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const audioContextRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // 1. Memuat Model INT8 dari Hugging Face ke Memori WASM Browser
+  // Load INT8 ONNX Model into WASM Memory
   useEffect(() => {
     async function initPipeline() {
       try {
@@ -37,17 +37,27 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
         setTranscriber(() => pipe);
         setIsModelLoading(false);
       } catch (error) {
-        console.error('Gagal memuat model ONNX WASM:', error);
+        console.error('Failed to load ONNX WASM model:', error);
+        setErrorMessage('Failed to load the speech recognition model.');
         setIsModelLoading(false);
       }
     }
     initPipeline();
   }, []);
 
-  // 2. Merekam Audio dari Mikrofon (16kHz PCM Stream)
+  // Start Recording
   const startRecording = async () => {
     audioChunksRef.current = [];
     setTranscript('');
+    setErrorMessage('');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setErrorMessage(
+        'Microphone access is not supported or blocked in this environment. Please open the app in a new browser tab.'
+      );
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -69,11 +79,14 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       processor.connect(audioCtx.destination);
       setIsRecording(true);
     } catch (err) {
-      console.error('Akses mikrofon ditolak atau gagal:', err);
+      console.error('Microphone access error:', err);
+      setErrorMessage(
+        'Microphone permission denied. Please allow microphone access in your browser.'
+      );
     }
   };
 
-  // 3. Menghentikan Rekaman & Eksekusi Inferensi WASM Lokal
+  // Stop Recording & Run Inference
   const stopRecordingAndTranscribe = async () => {
     if (!mediaStreamRef.current) return;
 
@@ -83,7 +96,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     }
     setIsRecording(false);
 
-    // Menggabungkan potongan buffer PCM audio menjadi satu Float32Array
     const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
     const mergedAudio = new Float32Array(totalLength);
     let offset = 0;
@@ -92,7 +104,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       offset += chunk.length;
     }
 
-    // 4. Jalankan Inferensi di Browser
     if (transcriber && mergedAudio.length > 0) {
       setIsTranscribing(true);
       try {
@@ -106,12 +117,12 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
         const transcribedText = output.text.trim();
         setTranscript(transcribedText);
 
-        // Teruskan teks ke App.jsx untuk pemicu intent LLM (Gemma 4)
         if (onTranscribeComplete && transcribedText) {
           onTranscribeComplete(transcribedText);
         }
       } catch (err) {
-        console.error('Error saat inferensi WASM:', err);
+        console.error('WASM inference error:', err);
+        setErrorMessage('Failed to transcribe audio.');
       } finally {
         setIsTranscribing(false);
       }
@@ -125,7 +136,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       {isModelLoading ? (
         <div style={styles.loadingContainer}>
           <p style={styles.loadingText}>
-            Memuat Model INT8 ke Memori WebAssembly... ({modelProgress}%)
+            Loading INT8 Model into WebAssembly Memory... ({modelProgress}%)
           </p>
           <div style={styles.progressBarBg}>
             <div style={{ ...styles.progressBarFill, width: `${modelProgress}%` }} />
@@ -147,16 +158,22 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
           {isTranscribing && (
             <p style={{ color: '#d97706', marginTop: '0.75rem', fontSize: '0.9rem' }}>
-              ⚡ Menjalankan inferensi ONNX lokal di browser...
+              ⚡ Running local ONNX inference in browser...
+            </p>
+          )}
+
+          {errorMessage && (
+            <p style={{ color: '#ef4444', marginTop: '0.75rem', fontSize: '0.9rem' }}>
+              ⚠️ {errorMessage}
             </p>
           )}
 
           <div style={styles.transcriptBox}>
             <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', color: '#374151' }}>
-              Hasil Transkripsi Teks:
+              Transcribed Text:
             </h4>
             <p style={{ margin: 0, color: transcript ? '#111827' : '#9ca3af' }}>
-              {transcript || (isRecording ? 'Merekam suara...' : 'Belum ada suara direkam.')}
+              {transcript || (isRecording ? 'Listening to audio...' : 'No speech recorded yet.')}
             </p>
           </div>
         </div>
