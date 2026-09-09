@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { pipeline, env } from '@xenova/transformers';
 
+// Konfigurasi lingkungan transformers.js
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
@@ -17,172 +18,126 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Load INT8 ONNX Model into WASM Memory
-  // Load INT8 ONNX Model into WASM Memory
-useEffect(() => {
-  async function initPipeline() {
-    try {
-      setIsModelLoading(true);
-      const pipe = await pipeline(
-        'automatic-speech-recognition',
-        'VCoklat/edgespeech-whisper-tiny-int8',
-        {
-          quantized: true,
-          model_file_names: {
-            encoder: 'encoder_model_quantized',
-            decoder: 'decoder_model_quantized',
-            decoder_with_past: 'decoder_with_past_model_quantized',
-          },
-          progress_callback: (p) => {
-            if (p.status === 'progress') {
-              setModelProgress(Math.round(p.progress || 0));
-            }
-          },
-        }
+  // Load INT8 ONNX Model ke memori WebAssembly
+  useEffect(() => {
+    async function initPipeline() {
+      try {
+        setIsModelLoading(true);
+        const pipe = await pipeline(
+          'automatic-speech-recognition',
+          'VCoklat/edgespeech-whisper-tiny-int8',
+          {
+            quantized: true,
+            progress_callback: (p) => {
+              if (p.status === 'progress') {
+                setModelProgress(Math.round(p.progress || 0));
+              }
+            },
+          }
+        );
+        setTranscriber(() => pipe);
+        setIsModelLoading(false);
+      } catch (error) {
+        console.error('Failed to load ONNX WASM model:', error);
+        setErrorMessage('Failed to load the speech recognition model.');
+        setIsModelLoading(false);
+      }
+    }
+    initPipeline();
+  }, []);
+
+  // Mulai Perekaman Audio
+  const startRecording = async () => {
+    audioChunksRef.current = [];
+    setTranscript('');
+    setErrorMessage('');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setErrorMessage(
+        'Microphone access is not supported or blocked in this environment.'
       );
-      setTranscriber(() => pipe);
-      setIsModelLoading(false);
-    } catch (error) {
-      console.error('Failed to load ONNX WASM model:', error);
-      setErrorMessage('Failed to load the speech recognition model.');
-      setIsModelLoading(false);
+      return;
     }
-  }
-  initPipeline();
-}, []);
 
-  // Start Recording
-  // 1. Perbarui fungsi startRecording (Tambahkan audioCtx.resume())
-const startRecording = async () => {
-  audioChunksRef.current = [];
-  setTranscript('');
-  setErrorMessage('');
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setErrorMessage('Akses mikrofon tidak didukung atau terblokir di lingkungan ini.');
-    return;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaStreamRef.current = stream;
-
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-      sampleRate: 16000,
-    });
-    
-    // Pastikan AudioContext aktif dan tidak dalam keadaan suspended
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume();
-    }
-    
-    audioContextRef.current = audioCtx;
-
-    const source = audioCtx.createMediaStreamSource(stream);
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-    processor.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0);
-      audioChunksRef.current.push(new Float32Array(inputData));
-    };
-
-    source.connect(processor);
-    processor.connect(audioCtx.destination);
-    setIsRecording(true);
-  } catch (err) {
-    console.error('Microphone access error:', err);
-    setErrorMessage('Izin mikrofon ditolak. Silakan izinkan akses mikrofon di browser.');
-  }
-};
-
-// 2. Perbarui fungsi stopRecordingAndTranscribe (Beri jeda setTimeout agar UI sempat re-render)
-const stopRecordingAndTranscribe = async () => {
-  if (!mediaStreamRef.current) return;
-
-  // Hentikan perekaman audio
-  mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-  if (audioContextRef.current) {
-    await audioContextRef.current.close();
-  }
-  setIsRecording(false);
-
-  // Periksa apakah ada sampel data audio yang terekam
-  const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-  if (totalLength === 0) {
-    setErrorMessage('Tidak ada data audio yang terekam. Coba bicara ulang.');
-    return;
-  }
-
-  // Ubah status ke transcribing dulu agar UI memperbarui tombol/teks
-  setIsTranscribing(true);
-
-  // Jeda 50ms agar React sempat merender UI "Transcribing..." sebelum WASM mengunci main thread
-  setTimeout(async () => {
     try {
-      const mergedAudio = new Float32Array(totalLength);
-      let offset = 0;
-      for (const chunk of audioChunksRef.current) {
-        mergedAudio.set(chunk, offset);
-        offset += chunk.length;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000,
+      });
+
+      // Aktifkan AudioContext jika browser memulainya dalam keadaan 'suspended'
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
       }
 
-      if (transcriber) {
-        const output = await transcriber(mergedAudio, {
-          chunk_length_s: 30,
-          stride_length_s: 5,
-          language: 'english',
-          task: 'transcribe',
-        });
+      audioContextRef.current = audioCtx;
 
-        const transcribedText = output.text.trim();
-        setTranscript(transcribedText);
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-        if (onTranscribeComplete && transcribedText) {
-          onTranscribeComplete(transcribedText);
-        }
-      }
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        audioChunksRef.current.push(new Float32Array(inputData));
+      };
+
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+      setIsRecording(true);
     } catch (err) {
-      console.error('WASM inference error:', err);
-      setErrorMessage('Gagal mentranskripsi audio.');
-    } finally {
-      setIsTranscribing(false);
+      console.error('Microphone access error:', err);
+      setErrorMessage(
+        'Microphone permission denied. Please allow microphone access in your browser settings.'
+      );
     }
-  }, 50);
-};
+  };
 
-  // Stop Recording & Run Inference
+  // Hentikan Perekaman & Jalankan Inferensi WASM
   const stopRecordingAndTranscribe = async () => {
     if (!mediaStreamRef.current) return;
 
+    // Hentikan stream mikrofon dan tutup AudioContext
     mediaStreamRef.current.getTracks().forEach((track) => track.stop());
     if (audioContextRef.current) {
       await audioContextRef.current.close();
     }
     setIsRecording(false);
 
+    // Verifikasi keberadaan sampel audio
     const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-    const mergedAudio = new Float32Array(totalLength);
-    let offset = 0;
-    for (const chunk of audioChunksRef.current) {
-      mergedAudio.set(chunk, offset);
-      offset += chunk.length;
+    if (totalLength === 0) {
+      setErrorMessage('No audio data recorded. Please try speaking again.');
+      return;
     }
 
-    if (transcriber && mergedAudio.length > 0) {
-      setIsTranscribing(true);
+    // Set status transcribing agar React merender state loading sebelum WASM mengunci thread
+    setIsTranscribing(true);
+
+    // Jeda 50ms memberi waktu browser melakukan re-render UI tombol
+    setTimeout(async () => {
       try {
-        const output = await transcriber(mergedAudio, {
-          chunk_length_s: 30,
-          stride_length_s: 5,
-          language: 'english',
-          task: 'transcribe',
-        });
+        const mergedAudio = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunksRef.current) {
+          mergedAudio.set(chunk, offset);
+          offset += chunk.length;
+        }
 
-        const transcribedText = output.text.trim();
-        setTranscript(transcribedText);
+        if (transcriber) {
+          const output = await transcriber(mergedAudio, {
+            chunk_length_s: 30,
+            stride_length_s: 5,
+            language: 'english',
+            task: 'transcribe',
+          });
 
-        if (onTranscribeComplete && transcribedText) {
-          onTranscribeComplete(transcribedText);
+          const transcribedText = output.text.trim();
+          setTranscript(transcribedText);
+
+          if (onTranscribeComplete && transcribedText) {
+            onTranscribeComplete(transcribedText);
+          }
         }
       } catch (err) {
         console.error('WASM inference error:', err);
@@ -190,7 +145,7 @@ const stopRecordingAndTranscribe = async () => {
       } finally {
         setIsTranscribing(false);
       }
-    }
+    }, 50);
   };
 
   return (
@@ -215,6 +170,7 @@ const stopRecordingAndTranscribe = async () => {
               ...styles.button,
               backgroundColor: isRecording ? '#ef4444' : '#2563eb',
               opacity: isTranscribing ? 0.6 : 1,
+              cursor: isTranscribing ? 'not-allowed' : 'pointer',
             }}
           >
             {isRecording ? 'Stop & Transcribe' : 'Start Recording'}
@@ -285,7 +241,6 @@ const styles = {
     border: 'none',
     borderRadius: '6px',
     fontWeight: '600',
-    cursor: 'pointer',
     fontSize: '1rem',
     transition: 'background-color 0.2s',
   },
