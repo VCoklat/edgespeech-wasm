@@ -28,11 +28,11 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
           'automatic-speech-recognition',
           'VCoklat/edgespeech-whisper-tiny-int8',
           {
-            quantized: false, // Bypass default suffix appending
+            quantized: true,
             model_file_names: {
-              encoder: 'encoder_model_quantized.onnx',
-              decoder: 'decoder_model_quantized.onnx',
-              decoder_with_past: 'decoder_with_past_model_quantized.onnx',
+              encoder: 'encoder_model_quantized',
+              decoder: 'decoder_model_quantized',
+              decoder_with_past: 'decoder_with_past_model_quantized',
             },
             progress_callback: (p) => {
               if (p.status === 'progress') {
