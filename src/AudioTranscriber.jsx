@@ -18,7 +18,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
   const processorRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Load INT8 Model natively using standard dual-decoder fallback
   useEffect(() => {
     async function initPipeline() {
       try {
@@ -46,6 +45,29 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     initPipeline();
   }, []);
 
+  // Resample buffer audio ke 16000Hz secara akurat
+  const resampleTo16kHz = async (audioData, originalSampleRate) => {
+    if (originalSampleRate === 16000) return audioData;
+
+    const targetLength = Math.round((audioData.length * 16000) / originalSampleRate);
+    const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(
+      1,
+      targetLength,
+      16000
+    );
+
+    const buffer = offlineCtx.createBuffer(1, audioData.length, originalSampleRate);
+    buffer.copyToChannel(audioData, 0);
+
+    const source = offlineCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+
+    const renderedBuffer = await offlineCtx.startRendering();
+    return renderedBuffer.getChannelData(0);
+  };
+
   const startRecording = async () => {
     audioChunksRef.current = [];
     setTranscript('');
@@ -60,9 +82,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-      });
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
       if (audioCtx.state === 'suspended') {
         await audioCtx.resume();
@@ -95,6 +115,8 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     if (processorRef.current) {
       processorRef.current.disconnect();
     }
+    
+    const sampleRate = audioContextRef.current?.sampleRate || 44100;
     if (audioContextRef.current) {
       await audioContextRef.current.close();
     }
@@ -111,21 +133,20 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
     setTimeout(async () => {
       try {
-        const mergedAudio = new Float32Array(totalLength);
+        const rawAudio = new Float32Array(totalLength);
         let offset = 0;
         for (const chunk of audioChunksRef.current) {
-          mergedAudio.set(chunk, offset);
+          rawAudio.set(chunk, offset);
           offset += chunk.length;
         }
 
+        // Resample audio ke 16kHz
+        const audio16k = await resampleTo16kHz(rawAudio, sampleRate);
+
         if (transcriber) {
-          const output = await transcriber(mergedAudio, {
-            chunk_length_s: 30,
-            stride_length_s: 5,
+          const output = await transcriber(audio16k, {
             language: 'english',
             task: 'transcribe',
-            return_timestamps: false,
-            force_full_sequences: false,
           });
 
           const rawText = Array.isArray(output) ? output[0]?.text : output?.text;
