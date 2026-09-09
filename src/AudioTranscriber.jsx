@@ -45,7 +45,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     initPipeline();
   }, []);
 
-  // Resample buffer audio ke 16000Hz secara akurat
   const resampleTo16kHz = async (audioData, originalSampleRate) => {
     if (originalSampleRate === 16000) return audioData;
 
@@ -140,13 +139,13 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
           offset += chunk.length;
         }
 
-        // Resample audio ke 16kHz
         const audio16k = await resampleTo16kHz(rawAudio, sampleRate);
 
         if (transcriber) {
           const output = await transcriber(audio16k, {
             language: 'english',
             task: 'transcribe',
+            use_cache: false, // Menonaktifkan past_key_values untuk mencegah input mismatch
           });
 
           const rawText = Array.isArray(output) ? output[0]?.text : output?.text;
