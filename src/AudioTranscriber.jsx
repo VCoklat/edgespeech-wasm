@@ -18,32 +18,38 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
   const audioChunksRef = useRef([]);
 
   // Load INT8 ONNX Model into WASM Memory
-  useEffect(() => {
-    async function initPipeline() {
-      try {
-        setIsModelLoading(true);
-        const pipe = await pipeline(
-          'automatic-speech-recognition',
-          'VCoklat/edgespeech-whisper-tiny-int8',
-          {
-            quantized: true,
-            progress_callback: (p) => {
-              if (p.status === 'progress') {
-                setModelProgress(Math.round(p.progress || 0));
-              }
-            },
-          }
-        );
-        setTranscriber(() => pipe);
-        setIsModelLoading(false);
-      } catch (error) {
-        console.error('Failed to load ONNX WASM model:', error);
-        setErrorMessage('Failed to load the speech recognition model.');
-        setIsModelLoading(false);
-      }
+  // Load INT8 ONNX Model into WASM Memory
+useEffect(() => {
+  async function initPipeline() {
+    try {
+      setIsModelLoading(true);
+      const pipe = await pipeline(
+        'automatic-speech-recognition',
+        'VCoklat/edgespeech-whisper-tiny-int8',
+        {
+          quantized: true,
+          model_file_names: {
+            encoder: 'encoder_model_quantized',
+            decoder: 'decoder_model_quantized',
+            decoder_with_past: 'decoder_with_past_model_quantized',
+          },
+          progress_callback: (p) => {
+            if (p.status === 'progress') {
+              setModelProgress(Math.round(p.progress || 0));
+            }
+          },
+        }
+      );
+      setTranscriber(() => pipe);
+      setIsModelLoading(false);
+    } catch (error) {
+      console.error('Failed to load ONNX WASM model:', error);
+      setErrorMessage('Failed to load the speech recognition model.');
+      setIsModelLoading(false);
     }
-    initPipeline();
-  }, []);
+  }
+  initPipeline();
+}, []);
 
   // Start Recording
   const startRecording = async () => {
