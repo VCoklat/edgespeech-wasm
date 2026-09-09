@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { pipeline, env } from '@xenova/transformers';
 
-// Konfigurasi lingkungan transformers.js
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
@@ -16,9 +15,9 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
   const audioContextRef = useRef(null);
   const mediaStreamRef = useRef(null);
+  const processorRef = useRef(null); // Reference agar tidak kena Garbage Collection
   const audioChunksRef = useRef([]);
 
-  // Load INT8 ONNX Model ke memori WebAssembly
   useEffect(() => {
     async function initPipeline() {
       try {
@@ -39,23 +38,20 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
         setIsModelLoading(false);
       } catch (error) {
         console.error('Failed to load ONNX WASM model:', error);
-        setErrorMessage('Failed to load the speech recognition model.');
+        setErrorMessage('Failed to load speech recognition model.');
         setIsModelLoading(false);
       }
     }
     initPipeline();
   }, []);
 
-  // Mulai Perekaman Audio
   const startRecording = async () => {
     audioChunksRef.current = [];
     setTranscript('');
     setErrorMessage('');
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setErrorMessage(
-        'Microphone access is not supported or blocked in this environment.'
-      );
+      setErrorMessage('Microphone access is not supported in this browser.');
       return;
     }
 
@@ -67,7 +63,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
         sampleRate: 16000,
       });
 
-      // Aktifkan AudioContext jika browser memulainya dalam keadaan 'suspended'
       if (audioCtx.state === 'suspended') {
         await audioCtx.resume();
       }
@@ -76,6 +71,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
       const source = audioCtx.createMediaStreamSource(stream);
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor; // Simpan reference
 
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
@@ -86,35 +82,33 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       processor.connect(audioCtx.destination);
       setIsRecording(true);
     } catch (err) {
-      console.error('Microphone access error:', err);
-      setErrorMessage(
-        'Microphone permission denied. Please allow microphone access in your browser settings.'
-      );
+      console.error('Microphone error:', err);
+      setErrorMessage('Microphone permission denied.');
     }
   };
 
-  // Hentikan Perekaman & Jalankan Inferensi WASM
   const stopRecordingAndTranscribe = async () => {
     if (!mediaStreamRef.current) return;
 
-    // Hentikan stream mikrofon dan tutup AudioContext
     mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+    }
     if (audioContextRef.current) {
       await audioContextRef.current.close();
     }
     setIsRecording(false);
 
-    // Verifikasi keberadaan sampel audio
     const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+    console.log('Total audio samples captured:', totalLength);
+
     if (totalLength === 0) {
-      setErrorMessage('No audio data recorded. Please try speaking again.');
+      setErrorMessage('No audio captured. Please check microphone permissions.');
       return;
     }
 
-    // Set status transcribing agar React merender state loading sebelum WASM mengunci thread
     setIsTranscribing(true);
 
-    // Jeda 50ms memberi waktu browser melakukan re-render UI tombol
     setTimeout(async () => {
       try {
         const mergedAudio = new Float32Array(totalLength);
@@ -132,15 +126,23 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
             task: 'transcribe',
           });
 
-          const transcribedText = output.text.trim();
-          setTranscript(transcribedText);
+          console.log('Raw model output:', output);
 
-          if (onTranscribeComplete && transcribedText) {
-            onTranscribeComplete(transcribedText);
+          // Ambil teks dari format objek maupun array
+          const rawText = Array.isArray(output) ? output[0]?.text : output?.text;
+          const transcribedText = (rawText || '').trim();
+
+          if (transcribedText.length > 0) {
+            setTranscript(transcribedText);
+            if (onTranscribeComplete) {
+              onTranscribeComplete(transcribedText);
+            }
+          } else {
+            setTranscript('No speech detected in recording.');
           }
         }
       } catch (err) {
-        console.error('WASM inference error:', err);
+        console.error('Inference error:', err);
         setErrorMessage('Failed to transcribe audio.');
       } finally {
         setIsTranscribing(false);
@@ -155,7 +157,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
       {isModelLoading ? (
         <div style={styles.loadingContainer}>
           <p style={styles.loadingText}>
-            Loading INT8 Model into WebAssembly Memory... ({modelProgress}%)
+            Loading INT8 Model into WASM Memory... ({modelProgress}%)
           </p>
           <div style={styles.progressBarBg}>
             <div style={{ ...styles.progressBarFill, width: `${modelProgress}%` }} />
@@ -170,7 +172,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
               ...styles.button,
               backgroundColor: isRecording ? '#ef4444' : '#2563eb',
               opacity: isTranscribing ? 0.6 : 1,
-              cursor: isTranscribing ? 'not-allowed' : 'pointer',
             }}
           >
             {isRecording ? 'Stop & Transcribe' : 'Start Recording'}
@@ -210,19 +211,9 @@ const styles = {
     padding: '1.5rem',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
   },
-  cardTitle: {
-    margin: '0 0 1rem 0',
-    fontSize: '1.1rem',
-    color: '#111827',
-  },
-  loadingContainer: {
-    padding: '0.5rem 0',
-  },
-  loadingText: {
-    fontSize: '0.9rem',
-    color: '#4b5563',
-    marginBottom: '0.5rem',
-  },
+  cardTitle: { margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#111827' },
+  loadingContainer: { padding: '0.5rem 0' },
+  loadingText: { fontSize: '0.9rem', color: '#4b5563', marginBottom: '0.5rem' },
   progressBarBg: {
     width: '100%',
     height: '8px',
@@ -242,7 +233,7 @@ const styles = {
     borderRadius: '6px',
     fontWeight: '600',
     fontSize: '1rem',
-    transition: 'background-color 0.2s',
+    cursor: 'pointer',
   },
   transcriptBox: {
     marginTop: '1.25rem',
