@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { pipeline, env } from '@xenova/transformers';
 
-// Configure transformers.js environment
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
@@ -16,10 +15,10 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
   const audioContextRef = useRef(null);
   const mediaStreamRef = useRef(null);
-  const processorRef = useRef(null); // Prevent GC from dropping audio processor
+  const processorRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // Load INT8 ONNX Model into WebAssembly Memory
+  // Load INT8 Model natively using standard dual-decoder fallback
   useEffect(() => {
     async function initPipeline() {
       try {
@@ -29,11 +28,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
           'VCoklat/edgespeech-whisper-tiny-int8',
           {
             quantized: true,
-            model_file_names: {
-              encoder: 'encoder_model_quantized',
-              decoder: 'decoder_model_quantized',
-              decoder_with_past: 'decoder_with_past_model_quantized',
-            },
             progress_callback: (p) => {
               if (p.status === 'progress') {
                 setModelProgress(Math.round(p.progress || 0));
@@ -52,7 +46,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     initPipeline();
   }, []);
 
-  // Start Audio Recording
   const startRecording = async () => {
     audioChunksRef.current = [];
     setTranscript('');
@@ -79,7 +72,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
       const source = audioCtx.createMediaStreamSource(stream);
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor; // Store in ref to keep reference active
+      processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
@@ -95,11 +88,9 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
     }
   };
 
-  // Stop Recording & Run Local WASM Inference
   const stopRecordingAndTranscribe = async () => {
     if (!mediaStreamRef.current) return;
 
-    // Disconnect stream & processors
     mediaStreamRef.current.getTracks().forEach((track) => track.stop());
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -118,7 +109,6 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
 
     setIsTranscribing(true);
 
-    // Give React 50ms to render the UI loading state before WASM locks main thread
     setTimeout(async () => {
       try {
         const mergedAudio = new Float32Array(totalLength);
@@ -134,9 +124,10 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
             stride_length_s: 5,
             language: 'english',
             task: 'transcribe',
+            return_timestamps: false,
+            force_full_sequences: false,
           });
 
-          // Safely parse output from array or object return type
           const rawText = Array.isArray(output) ? output[0]?.text : output?.text;
           const transcribedText = (rawText || '').trim();
 
@@ -220,19 +211,9 @@ const styles = {
     padding: '1.5rem',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
   },
-  cardTitle: {
-    margin: '0 0 1rem 0',
-    fontSize: '1.1rem',
-    color: '#111827',
-  },
-  loadingContainer: {
-    padding: '0.5rem 0',
-  },
-  loadingText: {
-    fontSize: '0.9rem',
-    color: '#4b5563',
-    marginBottom: '0.5rem',
-  },
+  cardTitle: { margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#111827' },
+  loadingContainer: { padding: '0.5rem 0' },
+  loadingText: { fontSize: '0.9rem', color: '#4b5563', marginBottom: '0.5rem' },
   progressBarBg: {
     width: '100%',
     height: '8px',
