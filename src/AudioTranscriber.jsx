@@ -52,45 +52,103 @@ useEffect(() => {
 }, []);
 
   // Start Recording
-  const startRecording = async () => {
-    audioChunksRef.current = [];
-    setTranscript('');
-    setErrorMessage('');
+  // 1. Perbarui fungsi startRecording (Tambahkan audioCtx.resume())
+const startRecording = async () => {
+  audioChunksRef.current = [];
+  setTranscript('');
+  setErrorMessage('');
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setErrorMessage(
-        'Microphone access is not supported or blocked in this environment. Please open the app in a new browser tab.'
-      );
-      return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setErrorMessage('Akses mikrofon tidak didukung atau terblokir di lingkungan ini.');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStreamRef.current = stream;
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000,
+    });
+    
+    // Pastikan AudioContext aktif dan tidak dalam keadaan suspended
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
     }
+    
+    audioContextRef.current = audioCtx;
 
+    const source = audioCtx.createMediaStreamSource(stream);
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0);
+      audioChunksRef.current.push(new Float32Array(inputData));
+    };
+
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+    setIsRecording(true);
+  } catch (err) {
+    console.error('Microphone access error:', err);
+    setErrorMessage('Izin mikrofon ditolak. Silakan izinkan akses mikrofon di browser.');
+  }
+};
+
+// 2. Perbarui fungsi stopRecordingAndTranscribe (Beri jeda setTimeout agar UI sempat re-render)
+const stopRecordingAndTranscribe = async () => {
+  if (!mediaStreamRef.current) return;
+
+  // Hentikan perekaman audio
+  mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+  if (audioContextRef.current) {
+    await audioContextRef.current.close();
+  }
+  setIsRecording(false);
+
+  // Periksa apakah ada sampel data audio yang terekam
+  const totalLength = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+  if (totalLength === 0) {
+    setErrorMessage('Tidak ada data audio yang terekam. Coba bicara ulang.');
+    return;
+  }
+
+  // Ubah status ke transcribing dulu agar UI memperbarui tombol/teks
+  setIsTranscribing(true);
+
+  // Jeda 50ms agar React sempat merender UI "Transcribing..." sebelum WASM mengunci main thread
+  setTimeout(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
+      const mergedAudio = new Float32Array(totalLength);
+      let offset = 0;
+      for (const chunk of audioChunksRef.current) {
+        mergedAudio.set(chunk, offset);
+        offset += chunk.length;
+      }
 
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
-      });
-      audioContextRef.current = audioCtx;
+      if (transcriber) {
+        const output = await transcriber(mergedAudio, {
+          chunk_length_s: 30,
+          stride_length_s: 5,
+          language: 'english',
+          task: 'transcribe',
+        });
 
-      const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const transcribedText = output.text.trim();
+        setTranscript(transcribedText);
 
-      processor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        audioChunksRef.current.push(new Float32Array(inputData));
-      };
-
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
-      setIsRecording(true);
+        if (onTranscribeComplete && transcribedText) {
+          onTranscribeComplete(transcribedText);
+        }
+      }
     } catch (err) {
-      console.error('Microphone access error:', err);
-      setErrorMessage(
-        'Microphone permission denied. Please allow microphone access in your browser.'
-      );
+      console.error('WASM inference error:', err);
+      setErrorMessage('Gagal mentranskripsi audio.');
+    } finally {
+      setIsTranscribing(false);
     }
-  };
+  }, 50);
+};
 
   // Stop Recording & Run Inference
   const stopRecordingAndTranscribe = async () => {
