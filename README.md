@@ -1,98 +1,146 @@
-# EdgeSpeech-WASM 
+# EdgeSpeech-WASM
 
-> **Zero-Cost, Low-Latency In-Browser Speech Recognition & Intent Engine**  
-> Powered by Dynamic INT8 Quantized Whisper-tiny, ONNX Runtime WebAssembly, FastAPI, and Google Gemma 4.
-
----
-
-## Overview
-
-**EdgeSpeech-WASM** is a proof-of-concept audio AI engine designed for real-time speech-to-text (ASR) and downstream intent classification running directly on the edge. By shifting model execution to the user's browser via WebAssembly and INT8 quantization, it achieves near-zero latency audio processing without expensive GPU server infrastructure.
-
-### Key Highlights
-* **Edge-Native Inference:** Runs quantized Whisper-tiny locally in the client browser using ONNX Runtime Web.
-* **70%+ Model Compression:** Dynamic INT8 quantization reduces the Whisper-tiny payload from ~150 MB down to ~40 MB.
-* **Low Latency:** Eliminates network overhead for audio transport by processing streaming PCM audio chunks on the device.
-* **Zero-Cost Architecture:** Fully client-side ASR with a lightweight FastAPI proxy hosted on Vercel connecting to Google Gemma 4 for instant text summaries and intent extraction.
+Zero-Cost, Low-Latency In-Browser Speech Recognition & Intent Extraction Engine powered by WebAssembly, ONNX Runtime, and Google Gemini.
 
 ---
 
-## 🏗️ Architecture
+## Technical Architecture
 
-[ Microphone Input ]
-│ (Web Audio API / PCM Stream)
-▼
-[ Browser Runtime (WASM) ] ──► [ ONNX Runtime Web (Whisper-tiny INT8) ]
-│
-▼ (Transcription Text)
-[ Google Gemma 4 ] ◄── [ FastAPI Gateway (Vercel) ] ◄──┘
-│
-▼
-[ Actionable Intent & Summary UI ]
+EdgeSpeech-WASM processes audio locally inside the user's browser using an INT8 quantized Whisper model executing via ONNX Runtime WebAssembly. Once transcribed, the resulting text is dispatched to a serverless endpoint to extract downstream intent using Google's Gemini / Gemma LLM models.
 
+```
+[ Microphone ] 
+      │
+      ▼
+[ WebAudio API ] ──► (OfflineAudioContext Resampling to 16kHz)
+      │
+      ▼
+[ Transformers.js / ONNX WASM ] ──► (In-Browser ASR: VCoklat/edgespeech-whisper-tiny-int8)
+      │
+      ▼
+[ Transcribed Text ]
+      │
+      ▼
+[ Vercel Serverless Endpoint (/api/intent) ] ──► [ Google Gemini / Gemma LLM ]
+      │
+      ▼
+[ Downstream Intent & Summary ]
 
----
-
-## Tech Stack
-
-| Component | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Edge ASR Engine** | ONNX Runtime Web + C++/WASM | Local in-browser model execution |
-| **Model Optimization** | PyTorch, Optimum, ONNX Quantization | FP32 to Unsigned INT8 dynamic compression |
-| **Frontend** | React, Tailwind CSS | Real-time waveform & streaming transcript UI |
-| **Backend Gateway** | FastAPI, Vercel Serverless | Light orchestration & API proxying |
-| **LLM Processing** | Google Gemma 4 (via Hugging Face API) | Natural Language Intent Extraction |
+```
 
 ---
 
-## Model Compression & Benchmarks
+## Core Features
 
-| Metric | Original (FP32) | Quantized (INT8) | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Encoder Size** | ~23 MB | ~8 MB | **~65% Reduction** |
-| **Decoder Size** | ~125 MB | ~33 MB | **~73% Reduction** |
-| **Memory Bandwidth** | High | Low | **Optimal for Mobile/Browser** |
-| **Execution Target** | WebGPU / CPU | WebAssembly (CPU) | **Zero External Dependencies** |
+* **100% Client-Side ASR:** Transcribes speech directly in the user's browser with zero backend server costs and complete privacy.
+* **INT8 Model Optimization:** Operates using a custom quantized Whisper Tiny model (`VCoklat/edgespeech-whisper-tiny-int8`) with a ~56MB WASM memory footprint.
+* **Hardware Audio Resampling:** Built-in `OfflineAudioContext` pipeline automatically resamples various hardware microphone inputs (44.1 kHz / 48 kHz) to the required 16 kHz Float32 array.
+* **Merged Decoder Graph:** Uses an optimized ONNX merged-decoder architecture to prevent Key-Value (`past_key_values`) input mismatch errors in browser inference loops.
+* **Secure LLM Integration:** Proxies downstream intent parsing through Vercel Serverless Functions to protect API credentials.
 
 ---
 
-## Quickstart
+## Technology Stack
 
-### 1. Model Quantization (Colab / Local)
-To reproduce the INT8 model conversion from Hugging Face:
+| Domain | Technology |
+| --- | --- |
+| **Frontend Framework** | React.js |
+| **Client Machine Learning** | ONNX Runtime WebAssembly, `@xenova/transformers` |
+| **ASR Model** | `VCoklat/edgespeech-whisper-tiny-int8` (Quantized INT8) |
+| **Audio Processing** | Web Audio API (`AudioContext`, `ScriptProcessorNode`, `OfflineAudioContext`) |
+| **Serverless API** | Vercel Serverless Functions (Node.js) |
+| **Downstream NLP** | Google AI Studio (Gemini / Gemma API) |
 
+---
+
+## Project Structure
+
+```
+├── api/
+│   └── intent.js            # Vercel Serverless Function proxying Gemini LLM calls
+├── src/
+│   ├── App.jsx              # Main dashboard container & UI orchestrator
+│   ├── AudioTranscriber.jsx # WASM Speech-to-Text component & Audio Pipeline
+│   └── main.jsx             # React entry point
+├── public/                  # Static assets
+├── package.json             # Dependencies & build scripts
+└── README.md                # Technical documentation
+
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+* Node.js (v18.x or higher)
+* npm or yarn
+* Google AI Studio API Key (for downstream intent processing)
+
+### Installation
+
+1. **Clone the repository:**
 ```bash
-# Export and quantize Whisper-tiny to ONNX INT8
-python scripts/quantize.py
-2. Backend Setup (FastAPI / Vercel)
-Bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-3. Frontend Setup (React)
-Bash
-cd frontend
+git clone https://github.com/VCoklat/edgespeech-wasm.git
+cd edgespeech-wasm
+
+```
+
+
+2. **Install dependencies:**
+```bash
 npm install
+
+```
+
+
+3. **Configure Environment Variables:**
+Create a `.env.local` file in the root directory:
+```env
+GEMINI_API_KEY=your_google_ai_studio_api_key_here
+
+```
+
+
+4. **Run the local development server:**
+```bash
 npm run dev
 
 ```
-Author
-Dedy Van Hauten
 
-Full-Stack & AI Optimization Engineer
 
-M.S. in Computer Science — University of Indonesia
-
-Specializing in Edge AI, Model Compression, and WebAssembly execution pipelines.
-
-License
-MIT License.
 
 ---
 
-## Contact & Hiring
+## Model Quantization & Export Pipeline
 
-I am currently **open to new opportunities** in AI/ML Engineering, Edge AI, and Full-Stack Systems Development. Feel free to reach out or connect!
+To re-quantize or export a custom Whisper model for ONNX Runtime WebAssembly:
 
-* ✉️ **Email:** [dvanhauten@gmail.com](mailto:dvanhauten@gmail.com)
-* 💼 **LinkedIn:** [Dedy Van Hauten](https://www.linkedin.com/in/dedyvanhauten)
+```bash
+# 1. Run local quantization script (filters FP32 graphs and quantizes to INT8)
+python quantize_pure_onnx.py
+
+# 2. Upload quantized INT8 artifacts directly to Hugging Face
+huggingface-cli login
+huggingface-cli upload VCoklat/edgespeech-whisper-tiny-int8 ./whisper-onnx-int8/onnx /onnx --delete-unknown
+huggingface-cli upload VCoklat/edgespeech-whisper-tiny-int8 ./whisper-onnx-int8/*.json /
+
+```
+
+---
+
+## Deployment
+
+To deploy to Vercel:
+
+1. Push your repository to GitHub.
+2. Import the project in [Vercel](https://vercel.com).
+3. Add `GEMINI_API_KEY` under **Project Settings -> Environment Variables**.
+4. Deploy the application.
+
+---
+
+## License
+
+MIT License. Free for open-source and commercial use.
