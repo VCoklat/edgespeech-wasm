@@ -24,7 +24,7 @@ export default function AudioTranscriber({ onTranscribeComplete }) {
         setIsModelLoading(true);
         const pipe = await pipeline(
           'automatic-speech-recognition',
-          'Xenova/whisper-tiny',
+          'VCoklat/edgespeech-whisper-tiny-int8',
           {
             quantized: true,
             progress_callback: (p) => {
